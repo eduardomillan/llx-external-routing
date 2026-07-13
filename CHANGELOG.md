@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2] - 2026-07-13
+
+### Fixed
+
+- Fixed config file lookup: scripts now search `/etc/llx-external-routes/config.conf` (system path) first, falling back to relative path for development.
+- Fixed gateway parsing: `nmcli -t` output includes field prefix (`IP4.GATEWAY:10.187.207.145`), now stripped correctly.
+- Fixed DNS parsing: `nmcli -t` outputs `IP4.DNS[n]:` with brackets, regex updated.
+- Fixed domain: `anydesk.net` (non-existent) corrected to `anydesk.com`.
+
 ## [0.1] - 2026-07-13
 
 ### Added
