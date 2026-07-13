@@ -4,6 +4,7 @@ debian/llx-external-routing/
 debian/llx-external-routing.substvars
 debian/debhelper-build-stamp
 debian/files
+debian/changelog
 *.deb
 *.buildinfo
 *.changes
