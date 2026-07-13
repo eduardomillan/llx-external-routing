@@ -1,9 +1,5 @@
 llx-external-routing (0.1-1) unstable; urgency=medium
 
-  * Initial release.
-  * NetworkManager dispatcher for automatic routing setup.
-  * Configurable domains and interfaces via config file.
-  * Systemd timer for periodic IP refresh.
-  * Support for tailscale, anydesk, facebook domains.
+  * See CHANGELOG.md for details.
 
- -- Eduardo Millan <eduardo.millan@gmail.com>  Mon, 13 Jul 2026 12:00:00 +0200
+ -- Eduardo Millan <eduardo.millan@gmail.com>  Mon, 13 Jul 2026 13:21:17 +0200
