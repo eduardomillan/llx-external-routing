@@ -1,0 +1,37 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE=1
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	# Create directory structure
+	install -d debian/llx-external-routing/etc/llx-external-routes
+	install -d debian/llx-external-routing/etc/llx-external-routes/ipsets
+	install -d debian/llx-external-routing/etc/systemd/system
+	install -d debian/llx-external-routing/usr/local/bin
+	install -d debian/llx-external-routing/etc/NetworkManager/dispatcher.d
+	# Install config
+	install -m 644 conf/config.conf debian/llx-external-routing/etc/llx-external-routes/config.conf
+	# Install scripts
+	install -m 755 scripts/llx-external-routing-dispatcher debian/llx-external-routing/usr/local/bin/llx-external-routing-dispatcher
+	install -m 755 scripts/refresh-external-routes debian/llx-external-routing/usr/local/bin/refresh-external-routes
+	# Install systemd units
+	install -m 644 systemd/llx-external-routes-refresh.service debian/llx-external-routing/etc/systemd/system/llx-external-routes-refresh.service
+	install -m 644 systemd/llx-external-routes-refresh.timer debian/llx-external-routing/etc/systemd/system/llx-external-routes-refresh.timer
+
+override_dh_auto_build:
+	# Nothing to build (shell scripts)
+
+override_dh_auto_test:
+	# No tests
+
+override_dh_installscripts:
+	dh_installscripts
+
+override_dh_usrlocal:
+	# Intentionally install to /usr/local/bin
+
+override_dh_auto_clean:
+	# Nothing to clean

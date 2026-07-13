@@ -1,0 +1,10 @@
+[Unit]
+Description=External Routing - Refresco de IPs de dominios
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/refresh-external-routes
+StandardOutput=journal
+StandardError=journal

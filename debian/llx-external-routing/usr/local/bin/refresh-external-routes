@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# =============================================================================
+# refresh-external-routes
+# Refreshes IPs for configured domains and updates routing rules.
+# Run periodically via cron or systemd timer.
+# =============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+CONF_DIR="$BASE_DIR/conf"
+IPSETS_DIR="$BASE_DIR/ipsets"
+
+# Load configuration
+if [[ -f "$CONF_DIR/config.conf" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONF_DIR/config.conf"
+else
+    echo "ERROR: Config file not found: $CONF_DIR/config.conf" >&2
+    exit 1
+fi
+
+LOG_DIR="$(dirname "${LOG_FILE:-/var/log/llx-external-routing.log}")"
+
+# =============================================================================
+# Helper functions
+# =============================================================================
+
+log_msg() {
+    local level="$1"
+    shift
+    local msg="$*"
+    if [[ "${VERBOSE:-0}" -ge "$level" ]]; then
+        local timestamp
+        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        local line="[$timestamp] [refresh] $msg"
+        if [[ -n "${LOG_FILE:-}" ]]; then
+            mkdir -p "$LOG_DIR" 2>/dev/null || true
+            echo "$line" >> "$LOG_FILE" 2>/dev/null || true
+        fi
+        logger -t llx-external-routing "$msg" 2>/dev/null || true
+    fi
+}
+
+is_external_up() {
+    local state
+    state=$(cat "/sys/class/net/$EXTERNAL_IFACE/operstate" 2>/dev/null || echo "down")
+    [[ "$state" == "up" ]]
+}
+
+resolve_domain() {
+    local domain="$1"
+    local ips=""
+    local resolved
+    resolved=$(dig +short +time=3 +tries=1 "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+    if [[ -n "$resolved" ]]; then
+        ips="$resolved"
+    fi
+    resolved=$(dig +short +time=3 +tries=1 "www.$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+    if [[ -n "$resolved" ]]; then
+        ips="$ips $resolved"
+    fi
+    echo "$ips" | tr ' ' '\n' | sort -uV | grep -v '^$' || true
+}
+
+get_external_dns() {
+    if [[ -n "${EXTERNAL_DNS:-}" ]]; then
+        echo "$EXTERNAL_DNS"
+        return
+    fi
+    nmcli -t -f IP4.DNS device show "$EXTERNAL_IFACE" 2>/dev/null | \
+        sed 's/^IP4.DNS[0-9]*://' | sort -u | tr '\n' ' '
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+log_msg 1 "Starting external route refresh"
+
+if ! is_external_up; then
+    log_msg 1 "Interface $EXTERNAL_IFACE is not up, skipping refresh"
+    exit 0
+fi
+
+local_gw=$(nmcli -t -f IP4.GATEWAY device show "$EXTERNAL_IFACE" 2>/dev/null | head -1)
+if [[ -z "$local_gw" || "$local_gw" == "" ]]; then
+    local_gw=$(ip route show dev "$EXTERNAL_IFACE" default 2>/dev/null | awk '/default/ {print $3}' | head -1)
+fi
+
+if [[ -z "$local_gw" ]]; then
+    log_msg 0 "ERROR: Could not get gateway for $EXTERNAL_IFACE"
+    exit 1
+fi
+
+log_msg 1 "External gateway: $local_gw"
+
+# Create routing table if it doesn't exist
+if ! grep -q "^$ROUTING_TABLE " /etc/iproute2/rt_tables 2>/dev/null; then
+    echo "$ROUTING_TABLE external" >> /etc/iproute2/rt_tables 2>/dev/null || true
+fi
+
+# Update default route in external table
+ip route replace default via "$local_gw" dev "$EXTERNAL_IFACE" table "$ROUTING_TABLE" 2>/dev/null || true
+
+# Remove existing rules
+while ip rule del table "$ROUTING_TABLE" 2>/dev/null; do :; done
+
+# Add DNS rules
+dns_servers=$(get_external_dns)
+for dns in $dns_servers; do
+    if [[ -n "$dns" ]]; then
+        ip rule add to "$dns" table "$ROUTING_TABLE" priority 10 2>/dev/null || true
+        log_msg 2 "DNS rule: $dns -> table $ROUTING_TABLE"
+    fi
+done
+
+# Resolve domains and add rules
+mkdir -p "$IPSETS_DIR"
+
+for domain in $DOMAINS; do
+    log_msg 2 "Resolving: $domain"
+    ips=$(resolve_domain "$domain")
+
+    if [[ -z "$ips" ]]; then
+        log_msg 1 "WARNING: Could not resolve $domain"
+        continue
+    fi
+
+    echo "$ips" > "$IPSETS_DIR/${domain}.ips"
+
+    for ip in $ips; do
+        ip rule add to "$ip" table "$ROUTING_TABLE" priority 20 2>/dev/null || true
+        log_msg 2 "Rule: $ip -> table $ROUTING_TABLE ($domain)"
+    done
+
+    log_msg 1 "$domain -> $(echo "$ips" | tr '\n' ' ')"
+done
+
+# Default rule
+ip rule add table "$ROUTING_TABLE" priority 99 2>/dev/null || true
+
+log_msg 1 "Refresh completed"

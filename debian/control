@@ -1,0 +1,21 @@
+Source: llx-external-routing
+Section: net
+Priority: optional
+Maintainer: Eduardo Millan <eduardo.millan@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.0
+Homepage: https://github.com/eduardomillan/llx-external-routing
+
+Package: llx-external-routing
+Architecture: all
+Depends: iproute2, dnsutils, network-manager, systemd
+Recommends: ${misc:Depends}
+Description: Selective domain-based routing for Linux
+ Routes traffic for specific domains through an external WiFi interface
+ while the rest of the traffic uses the corporate connection by default.
+ .
+ Features:
+  - NetworkManager dispatcher for automatic routing setup
+  - Configurable domains and network interfaces
+  - Systemd timer for periodic IP refresh
+  - Easy configuration via /etc/llx-external-routes/config.conf

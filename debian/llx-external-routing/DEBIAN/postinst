@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Create ipsets directory
+        mkdir -p /etc/llx-external-routes/ipsets
+
+        # Create NetworkManager dispatcher wrapper
+        mkdir -p /etc/NetworkManager/dispatcher.d
+        cat > /etc/NetworkManager/dispatcher.d/99-llx-external-routing << 'DISPATCHER'
+#!/usr/bin/env bash
+exec /usr/local/bin/llx-external-routing-dispatcher "$@"
+DISPATCHER
+        chmod 755 /etc/NetworkManager/dispatcher.d/99-llx-external-routing
+
+        # Reload systemd and enable timer
+        systemctl daemon-reload || true
+        systemctl enable llx-external-routes-refresh.timer || true
+        systemctl start llx-external-routes-refresh.timer || true
+        ;;
+esac
+
+

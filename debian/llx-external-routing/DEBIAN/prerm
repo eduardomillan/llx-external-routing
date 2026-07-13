@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Stop and disable timer
+        systemctl stop llx-external-routes-refresh.timer || true
+        systemctl disable llx-external-routes-refresh.timer || true
+
+        # Remove NetworkManager dispatcher
+        rm -f /etc/NetworkManager/dispatcher.d/99-llx-external-routing
+
+        # Clean up routing rules
+        TABLE_NUM=$(grep -E "^([0-9]+) external$" /etc/iproute2/rt_tables 2>/dev/null | awk '{print $1}' || echo "")
+        if [ -n "$TABLE_NUM" ]; then
+            while ip rule del table "$TABLE_NUM" 2>/dev/null; do :; done
+            ip route flush table "$TABLE_NUM" 2>/dev/null || true
+            sed -i "/^$TABLE_NUM /d" /etc/iproute2/rt_tables 2>/dev/null || true
+        fi
+        ;;
+esac
+
+
