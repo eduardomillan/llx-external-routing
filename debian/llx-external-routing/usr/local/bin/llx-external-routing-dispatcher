@@ -8,24 +8,33 @@
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONF_DIR="$(dirname "$SCRIPT_DIR")/conf"
+CONF_PATHS=(
+    "/etc/llx-external-routes/config.conf"
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../conf/config.conf"
+)
 
 # NetworkManager arguments: $1=interface, $2=action
 IFACE="${1:-}"
 ACTION="${2:-}"
 
 # Load configuration
-if [[ -f "$CONF_DIR/config.conf" ]]; then
-    # shellcheck source=/dev/null
-    source "$CONF_DIR/config.conf"
-else
-    echo "ERROR: Config file not found: $CONF_DIR/config.conf" >&2
+CONF_FOUND=false
+for CONF_FILE in "${CONF_PATHS[@]}"; do
+    if [[ -f "$CONF_FILE" ]]; then
+        # shellcheck source=/dev/null
+        source "$CONF_FILE"
+        CONF_FOUND=true
+        break
+    fi
+done
+
+if [[ "$CONF_FOUND" == false ]]; then
+    echo "ERROR: Config file not found in any of: ${CONF_PATHS[*]}" >&2
     exit 1
 fi
 
-# Directory for resolved IPs
-IPSETS_DIR="$(dirname "$SCRIPT_DIR")/ipsets"
+IPSETS_DIR="/etc/llx-external-routes/ipsets"
+mkdir -p "$IPSETS_DIR" 2>/dev/null || true
 
 # Log directory
 LOG_DIR="$(dirname "${LOG_FILE:-/var/log/llx-external-routing.log}")"
@@ -43,7 +52,7 @@ log_msg() {
         timestamp=$(date '+%Y-%m-%d %H:%M:%S')
         local line="[$timestamp] [dispatcher] $msg"
         if [[ -n "${LOG_FILE:-}" ]]; then
-            mkdir -p "$LOG_DIR" 2>/dev/null || true
+            mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
             echo "$line" >> "$LOG_FILE" 2>/dev/null || true
         fi
         logger -t llx-external-routing "$msg" 2>/dev/null || true
@@ -52,7 +61,7 @@ log_msg() {
 
 get_external_gateway() {
     local gw
-    gw=$(nmcli -t -f IP4.GATEWAY device show "$EXTERNAL_IFACE" 2>/dev/null | head -1)
+    gw=$(nmcli -t -f IP4.GATEWAY device show "$EXTERNAL_IFACE" 2>/dev/null | head -1 | sed 's/^IP4.GATEWAY://')
     if [[ -z "$gw" || "$gw" == "" ]]; then
         gw=$(ip route show dev "$EXTERNAL_IFACE" default 2>/dev/null | awk '/default/ {print $3}' | head -1)
     fi
@@ -65,7 +74,7 @@ get_external_dns() {
         return
     fi
     nmcli -t -f IP4.DNS device show "$EXTERNAL_IFACE" 2>/dev/null | \
-        sed 's/^IP4.DNS[0-9]*://' | sort -u | tr '\n' ' '
+        sed 's/^IP4.DNS\[[0-9]*\]://' | sort -u | tr '\n' ' '
 }
 
 resolve_domain() {
