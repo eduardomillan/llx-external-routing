@@ -8,6 +8,7 @@
 - `llx-exroute-cli` CLI: `list`, `add domain|ip`, `remove domain|ip`. Edits `config.conf` and applies the change immediately via `refresh-external-routes`.
 - `llx-exroute-cli get|set` for the rest of `config.conf` (`CORPORATE_IFACE`, `EXTERNAL_IFACE`, `ROUTING_TABLE`, `EXTERNAL_DNS`, `REFRESH_INTERVAL`, `LOG_FILE`, `VERBOSE`). `EXTERNAL_IFACE`/`ROUTING_TABLE` tear down the old table before applying.
 - `llx-exroute-cli get` (no key, or `get all`) dumps every supported config value at once.
+- `ENABLED` master switch in `config.conf`, managed via `llx-exroute-cli enable`/`disable`: disables routing fully (NetworkManager events and the refresh timer leave rules untouched while `ENABLED=0`) without touching Wi-Fi or the systemd timer. `disable` tears down live rules immediately; `enable` re-applies them if the external interface is up. Missing/empty `ENABLED` defaults to enabled.
 
 ### Fixed
 

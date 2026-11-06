@@ -28,6 +28,11 @@ is_external_up() {
     [[ "$state" == "up" ]]
 }
 
+# ENABLED=0 fully disables routing; missing/empty defaults to enabled.
+is_routing_enabled() {
+    [[ "${ENABLED:-1}" != "0" ]]
+}
+
 # Removes all "ip rule"/"ip route" entries for a routing table and drops
 # it from /etc/iproute2/rt_tables.
 teardown_table() {

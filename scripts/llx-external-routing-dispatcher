@@ -65,6 +65,11 @@ mkdir -p "$IPSETS_DIR" 2>/dev/null || true
 # =============================================================================
 
 setup_routing() {
+    if ! is_routing_enabled; then
+        log_msg 1 "Routing disabled (ENABLED=0), skipping setup for interface $EXTERNAL_IFACE"
+        return 0
+    fi
+
     log_msg 1 "Setting up external routing for interface $EXTERNAL_IFACE"
 
     local gw
