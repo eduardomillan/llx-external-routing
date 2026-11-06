@@ -10,6 +10,10 @@
 - `llx-exroute-cli get` (no key, or `get all`) dumps every supported config value at once.
 - `ENABLED` master switch in `config.conf`, managed via `llx-exroute-cli enable`/`disable`: disables routing fully (NetworkManager events and the refresh timer leave rules untouched while `ENABLED=0`) without touching Wi-Fi or the systemd timer. `disable` tears down live rules immediately; `enable` re-applies them if the external interface is up. Missing/empty `ENABLED` defaults to enabled.
 
+### Changed
+
+- The shipped `config.conf` template now ships with `DOMAINS=""` instead of real example domains (`tailscale.com`, `anydesk.com`, `facebook.com`, `fbcdn.net`). A fresh install no longer silently starts routing those out of the box; the previous values are now just an `# Example:` comment, matching how `IPS` already shipped empty. This only affects a brand-new `/etc/llx-external-routes/config.conf` — an existing one is left alone by `install.sh`, and dpkg's own conffile handling prompts (and defaults to keeping yours) on upgrade if you've edited it.
+
 ### Fixed
 
 - `REFRESH_INTERVAL` is now actually wired to the systemd timer (`OnUnitActiveSec`): previously it was declared in `config.conf` but never read by any script, so changing it did nothing. `install.sh` and the `.deb` postinst now apply it to the timer unit at install time, and `llx-exroute-cli set REFRESH_INTERVAL <minutes>` applies it live.
