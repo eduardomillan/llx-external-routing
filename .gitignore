@@ -8,3 +8,4 @@ debian/changelog
 *.deb
 *.buildinfo
 *.changes
+.private

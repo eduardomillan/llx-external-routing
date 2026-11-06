@@ -97,6 +97,7 @@ VERBOSE=1
 ### Domains
 
 - One domain per space in the `DOMAINS` variable
+- Ships empty by default (`DOMAINS=""`) — the shipped `config.conf` is a template, not a live example
 - Automatically resolved to IPv4 addresses
 - `www.` subdomains are also resolved
 - To add/remove domains, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-exroute-cli add domain <domain>`
@@ -104,6 +105,7 @@ VERBOSE=1
 ### Literal IPs
 
 - One IPv4 address or CIDR per space in the `IPS` variable (e.g. `IPS="172.28.222.250 10.0.0.0/24"`)
+- Ships empty by default (`IPS=""`)
 - Used as-is, with **no DNS resolution** — useful for targets that aren't a domain (internal hosts, VPN endpoints, etc.)
 - Invalid entries are skipped and logged as a warning
 - IPv6 is not supported
