@@ -5,8 +5,12 @@
 ### Added
 
 - `IPS` config variable: route literal IPv4 addresses/CIDRs through external WiFi, bypassing DNS resolution (useful for non-domain targets like `172.28.222.250`).
-- `llx-external-routes-ctl` CLI: `list`, `add domain|ip`, `remove domain|ip`. Edits `config.conf` and applies the change immediately via `refresh-external-routes`.
-- `llx-external-routes-ctl get|set` for the rest of `config.conf` (`CORPORATE_IFACE`, `EXTERNAL_IFACE`, `ROUTING_TABLE`, `EXTERNAL_DNS`, `LOG_FILE`, `VERBOSE`). `EXTERNAL_IFACE`/`ROUTING_TABLE` tear down the old table before applying. `REFRESH_INTERVAL` is intentionally left out — it isn't read by any script; the real interval is hardcoded in the systemd timer unit.
+- `llx-exroute-cli` CLI: `list`, `add domain|ip`, `remove domain|ip`. Edits `config.conf` and applies the change immediately via `refresh-external-routes`.
+- `llx-exroute-cli get|set` for the rest of `config.conf` (`CORPORATE_IFACE`, `EXTERNAL_IFACE`, `ROUTING_TABLE`, `EXTERNAL_DNS`, `REFRESH_INTERVAL`, `LOG_FILE`, `VERBOSE`). `EXTERNAL_IFACE`/`ROUTING_TABLE` tear down the old table before applying.
+
+### Fixed
+
+- `REFRESH_INTERVAL` is now actually wired to the systemd timer (`OnUnitActiveSec`): previously it was declared in `config.conf` but never read by any script, so changing it did nothing. `install.sh` and the `.deb` postinst now apply it to the timer unit at install time, and `llx-exroute-cli set REFRESH_INTERVAL <minutes>` applies it live.
 
 ### Changed
 

@@ -14,6 +14,11 @@ exec /usr/local/bin/llx-external-routing-dispatcher "$@"
 DISPATCHER
         chmod 755 /etc/NetworkManager/dispatcher.d/99-llx-external-routing
 
+        # Apply REFRESH_INTERVAL from config.conf to the timer unit
+        REFRESH_INTERVAL=$(grep -E '^REFRESH_INTERVAL=' /etc/llx-external-routes/config.conf 2>/dev/null | tail -1 | sed -E 's/^REFRESH_INTERVAL="?([0-9]+)"?$/\1/')
+        REFRESH_INTERVAL="${REFRESH_INTERVAL:-15}"
+        sed -i "s|^OnUnitActiveSec=.*|OnUnitActiveSec=${REFRESH_INTERVAL}min|" /etc/systemd/system/llx-external-routes-refresh.timer
+
         # Reload systemd and enable timer
         systemctl daemon-reload || true
         systemctl enable llx-external-routes-refresh.timer || true

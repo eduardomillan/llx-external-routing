@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# llx-external-routes-ctl
+# llx-exroute-cli
 # CLI to list, add and remove domains/IPs routed through the external
 # interface. Edits config.conf and applies the change immediately.
 # =============================================================================
@@ -64,8 +64,21 @@ done
 
 IPSETS_DIR="/etc/llx-external-routes/ipsets"
 
-SETTABLE_KEYS="CORPORATE_IFACE EXTERNAL_IFACE ROUTING_TABLE EXTERNAL_DNS LOG_FILE VERBOSE"
+SETTABLE_KEYS="CORPORATE_IFACE EXTERNAL_IFACE ROUTING_TABLE EXTERNAL_DNS REFRESH_INTERVAL LOG_FILE VERBOSE"
 GETTABLE_KEYS="$SETTABLE_KEYS DOMAINS IPS"
+
+TIMER_PATHS=(
+    "/etc/systemd/system/llx-external-routes-refresh.timer"
+    "$SCRIPT_DIR/../systemd/llx-external-routes-refresh.timer"
+)
+
+TIMER_UNIT=""
+for candidate in "${TIMER_PATHS[@]}"; do
+    if [[ -f "$candidate" ]]; then
+        TIMER_UNIT="$candidate"
+        break
+    fi
+done
 
 usage() {
     cat <<EOF
@@ -81,7 +94,6 @@ Destinations:
 Settings:
   get <key>                 Show a config value ($GETTABLE_KEYS)
   set <key> <value>         Change a config value ($SETTABLE_KEYS)
-                             (REFRESH_INTERVAL is not managed here, see README)
 
 Changes are written to $CONF_FILE and applied immediately (requires root).
 EOF
@@ -328,6 +340,29 @@ set_external_dns() {
     apply_change
 }
 
+set_refresh_interval() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 1 )) || { echo "ERROR: REFRESH_INTERVAL must be a positive integer (minutes)" >&2; exit 1; }
+
+    require_root
+    write_conf_var REFRESH_INTERVAL "$value"
+
+    if [[ -z "$TIMER_UNIT" ]]; then
+        echo "WARNING: systemd timer unit not found, REFRESH_INTERVAL saved but not applied" >&2
+        return
+    fi
+
+    sed -i "s|^OnUnitActiveSec=.*|OnUnitActiveSec=${value}min|" "$TIMER_UNIT"
+
+    if command -v systemctl &>/dev/null; then
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl restart llx-external-routes-refresh.timer 2>/dev/null || true
+        echo "REFRESH_INTERVAL set to '$value' minutes (timer reloaded)"
+    else
+        echo "REFRESH_INTERVAL set to '$value' minutes (systemctl not available, reload manually)"
+    fi
+}
+
 set_log_file() {
     local value="$1"
     if [[ -n "$value" && "${value:0:1}" != "/" ]]; then
@@ -370,6 +405,7 @@ case "${1:-}" in
             EXTERNAL_IFACE)  set_external_iface "$value" ;;
             ROUTING_TABLE)   set_routing_table "$value" ;;
             EXTERNAL_DNS)    set_external_dns "$value" ;;
+            REFRESH_INTERVAL) set_refresh_interval "$value" ;;
             LOG_FILE)        set_log_file "$value" ;;
             VERBOSE)         set_verbose "$value" ;;
             *) echo "ERROR: unknown or unsupported key '$key' (expected one of: $SETTABLE_KEYS)" >&2; exit 1 ;;
