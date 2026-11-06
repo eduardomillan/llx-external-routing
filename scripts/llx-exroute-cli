@@ -92,7 +92,8 @@ Destinations:
   remove ip <ip[/cidr]>     Remove a literal IPv4 address/CIDR
 
 Settings:
-  get <key>                 Show a config value ($GETTABLE_KEYS)
+  get [all]                 Show all config values ($GETTABLE_KEYS)
+  get <key>                 Show a single config value
   set <key> <value>         Change a config value ($SETTABLE_KEYS)
 
 Changes are written to $CONF_FILE and applied immediately (requires root).
@@ -390,7 +391,12 @@ case "${1:-}" in
         ;;
     get)
         key="${2:-}"
-        if [[ -z "$key" ]]; then usage; exit 1; fi
+        if [[ -z "$key" || "$key" == "all" ]]; then
+            for k in $GETTABLE_KEYS; do
+                echo "${k}=\"$(read_conf_var "$k")\""
+            done
+            exit 0
+        fi
         case " $GETTABLE_KEYS " in
             *" $key "*) echo "${key}=\"$(read_conf_var "$key")\"" ;;
             *) echo "ERROR: unknown key '$key' (expected one of: $GETTABLE_KEYS)" >&2; exit 1 ;;
