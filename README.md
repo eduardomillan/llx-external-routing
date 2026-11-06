@@ -163,6 +163,17 @@ sudo llx-exroute-cli set VERBOSE 1
 - `EXTERNAL_DNS` and `LOG_FILE` accept an empty value (`""`) to restore their defaults (DHCP-assigned DNS / logging disabled).
 - `REFRESH_INTERVAL` (minutes) rewrites `OnUnitActiveSec` in the installed `llx-external-routes-refresh.timer` unit and runs `systemctl daemon-reload` + `systemctl restart llx-external-routes-refresh.timer` to apply it immediately. `install.sh` and the `.deb` postinst also apply whatever `REFRESH_INTERVAL` is in `config.conf` to the timer at install time.
 
+### Master switch (`enable`/`disable`)
+
+There's no persistent background process to start/stop: the NetworkManager dispatcher only runs on interface up/down events, and the refresh service is a `oneshot` triggered by the systemd timer (which does have real `systemctl start|stop llx-external-routes-refresh.timer`, see [Useful commands](#useful-commands)). To turn routing off altogether without touching Wi-Fi or the timer, use the `ENABLED` master switch:
+
+```bash
+sudo llx-exroute-cli disable   # removes live rules now, and stops NM/refresh from re-adding them
+sudo llx-exroute-cli enable    # re-applies immediately if EXTERNAL_IFACE is up
+```
+
+`llx-exroute-cli list` shows the current state (`Routing: enabled` / `Routing: DISABLED`). Missing or empty `ENABLED` is treated as enabled (the pre-existing default behavior).
+
 ## Usage
 
 ### Automatic flow

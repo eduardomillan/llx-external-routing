@@ -60,6 +60,11 @@ mkdir -p "$IPSETS_DIR" 2>/dev/null || true
 
 log_msg 1 "Starting external route refresh"
 
+if ! is_routing_enabled; then
+    log_msg 1 "Routing disabled (ENABLED=0), skipping refresh"
+    exit 0
+fi
+
 if ! is_external_up; then
     log_msg 1 "Interface $EXTERNAL_IFACE is not up, skipping refresh"
     exit 0

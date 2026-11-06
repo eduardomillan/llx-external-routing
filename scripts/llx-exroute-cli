@@ -65,7 +65,7 @@ done
 IPSETS_DIR="/etc/llx-external-routes/ipsets"
 
 SETTABLE_KEYS="CORPORATE_IFACE EXTERNAL_IFACE ROUTING_TABLE EXTERNAL_DNS REFRESH_INTERVAL LOG_FILE VERBOSE"
-GETTABLE_KEYS="$SETTABLE_KEYS DOMAINS IPS"
+GETTABLE_KEYS="$SETTABLE_KEYS DOMAINS IPS ENABLED"
 
 TIMER_PATHS=(
     "/etc/systemd/system/llx-external-routes-refresh.timer"
@@ -95,6 +95,10 @@ Settings:
   get [all]                 Show all config values ($GETTABLE_KEYS)
   get <key>                 Show a single config value
   set <key> <value>         Change a config value ($SETTABLE_KEYS)
+
+Master switch:
+  enable                    Re-enable routing and apply it immediately
+  disable                   Disable routing and remove live rules now
 
 Changes are written to $CONF_FILE and applied immediately (requires root).
 EOF
@@ -147,6 +151,13 @@ list_targets() {
     local domains ips
     domains=$(read_conf_var DOMAINS)
     ips=$(read_conf_var IPS)
+
+    if is_routing_enabled; then
+        echo "Routing: enabled"
+    else
+        echo "Routing: DISABLED (sudo $(basename "$0") enable)"
+    fi
+    echo
 
     echo "EXTERNAL_IFACE ($EXTERNAL_IFACE) - routed via table $ROUTING_TABLE:"
 
@@ -385,9 +396,29 @@ set_verbose() {
     echo "VERBOSE set to '$value'"
 }
 
+disable_routing() {
+    require_root
+    write_conf_var ENABLED 0
+    teardown_table "$ROUTING_TABLE"
+    echo "Routing disabled: rules removed from table $ROUTING_TABLE"
+}
+
+enable_routing() {
+    require_root
+    write_conf_var ENABLED 1
+    echo "Routing enabled"
+    apply_change
+}
+
 case "${1:-}" in
     list)
         list_targets
+        ;;
+    disable)
+        disable_routing
+        ;;
+    enable)
+        enable_routing
         ;;
     get)
         key="${2:-}"
