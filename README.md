@@ -137,10 +137,14 @@ sudo llx-exroute-cli remove ip 172.28.222.250
 
 ### Settings (`get`/`set`)
 
-The rest of `config.conf` can also be managed from the CLI, except `REFRESH_INTERVAL` (see note below):
+The rest of `config.conf` can also be managed from the CLI:
 
 ```bash
-# Show a value
+# Show every config value
+llx-exroute-cli get
+llx-exroute-cli get all   # same thing
+
+# Show a single value
 llx-exroute-cli get ROUTING_TABLE
 
 # Change a value (requires root)
