@@ -8,9 +8,11 @@
 # =============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CONF_PATHS=(
     "/etc/llx-external-routes/config.conf"
-    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../conf/config.conf"
+    "$SCRIPT_DIR/../conf/config.conf"
 )
 
 # NetworkManager arguments: $1=interface, $2=action
@@ -33,64 +35,34 @@ if [[ "$CONF_FOUND" == false ]]; then
     exit 1
 fi
 
+LIB_PATHS=(
+    "/usr/local/lib/llx-external-routing/common-routing.sh"
+    "$SCRIPT_DIR/lib/common-routing.sh"
+)
+
+LIB_FOUND=false
+for LIB_FILE in "${LIB_PATHS[@]}"; do
+    if [[ -f "$LIB_FILE" ]]; then
+        # shellcheck source=/dev/null
+        source "$LIB_FILE"
+        LIB_FOUND=true
+        break
+    fi
+done
+
+if [[ "$LIB_FOUND" == false ]]; then
+    echo "ERROR: common-routing.sh not found in any of: ${LIB_PATHS[*]}" >&2
+    exit 1
+fi
+
+LOG_TAG="dispatcher"
+
 IPSETS_DIR="/etc/llx-external-routes/ipsets"
 mkdir -p "$IPSETS_DIR" 2>/dev/null || true
 
-# Log directory
-LOG_DIR="$(dirname "${LOG_FILE:-/var/log/llx-external-routing.log}")"
-
 # =============================================================================
-# Helper functions
+# Routing setup / teardown
 # =============================================================================
-
-log_msg() {
-    local level="$1"
-    shift
-    local msg="$*"
-    if [[ "${VERBOSE:-0}" -ge "$level" ]]; then
-        local timestamp
-        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        local line="[$timestamp] [dispatcher] $msg"
-        if [[ -n "${LOG_FILE:-}" ]]; then
-            mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-            echo "$line" >> "$LOG_FILE" 2>/dev/null || true
-        fi
-        logger -t llx-external-routing "$msg" 2>/dev/null || true
-    fi
-}
-
-get_external_gateway() {
-    local gw
-    gw=$(nmcli -t -f IP4.GATEWAY device show "$EXTERNAL_IFACE" 2>/dev/null | head -1 | sed 's/^IP4.GATEWAY://')
-    if [[ -z "$gw" || "$gw" == "" ]]; then
-        gw=$(ip route show dev "$EXTERNAL_IFACE" default 2>/dev/null | awk '/default/ {print $3}' | head -1)
-    fi
-    echo "$gw"
-}
-
-get_external_dns() {
-    if [[ -n "${EXTERNAL_DNS:-}" ]]; then
-        echo "$EXTERNAL_DNS"
-        return
-    fi
-    nmcli -t -f IP4.DNS device show "$EXTERNAL_IFACE" 2>/dev/null | \
-        sed 's/^IP4.DNS\[[0-9]*\]://' | sort -u | tr '\n' ' '
-}
-
-resolve_domain() {
-    local domain="$1"
-    local ips=""
-    local resolved
-    resolved=$(dig +short +time=3 +tries=1 "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-    if [[ -n "$resolved" ]]; then
-        ips="$resolved"
-    fi
-    resolved=$(dig +short +time=3 +tries=1 "www.$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-    if [[ -n "$resolved" ]]; then
-        ips="$ips $resolved"
-    fi
-    echo "$ips" | tr ' ' '\n' | sort -uV | grep -v '^$' || true
-}
 
 setup_routing() {
     log_msg 1 "Setting up external routing for interface $EXTERNAL_IFACE"
@@ -129,15 +101,6 @@ setup_routing() {
 
 resolve_and_add_rules() {
     # Remove existing rules for external table
-    while IFS= read -r line; do
-        local rule_num
-        rule_num=$(echo "$line" | awk -F: '{print $1}')
-        if [[ -n "$rule_num" ]]; then
-            ip rule del table "$ROUTING_TABLE" 2>/dev/null || true
-        fi
-    done < <(ip rule list | grep "lookup $ROUTING_TABLE" || true)
-
-    # Bulk remove old rules
     while ip rule del table "$ROUTING_TABLE" 2>/dev/null; do :; done
 
     # Add rule for external DNS (resolve via external interface)
@@ -150,29 +113,11 @@ resolve_and_add_rules() {
         fi
     done
 
-    # Save resolved IPs for reference
-    mkdir -p "$IPSETS_DIR"
+    # Resolve domains and add rules
+    add_domain_rules
 
-    # Resolve each domain and add rules
-    for domain in $DOMAINS; do
-        log_msg 2 "Resolving domain: $domain"
-        local ips
-        ips=$(resolve_domain "$domain")
-
-        if [[ -z "$ips" ]]; then
-            log_msg 1 "WARNING: Could not resolve $domain"
-            continue
-        fi
-
-        echo "$ips" > "$IPSETS_DIR/${domain}.ips"
-
-        for ip in $ips; do
-            ip rule add to "$ip" table "$ROUTING_TABLE" priority 20 2>/dev/null || true
-            log_msg 2 "Rule added: $ip -> table $ROUTING_TABLE ($domain)"
-        done
-
-        log_msg 1 "Domain $domain -> $(echo "$ips" | tr '\n' ' ')"
-    done
+    # Add rules for literal IPs/CIDRs (no DNS resolution needed)
+    add_static_ip_rules
 
     # Add default rule at the end (low priority)
     ip rule add table "$ROUTING_TABLE" priority 99 2>/dev/null || true
@@ -180,18 +125,7 @@ resolve_and_add_rules() {
 
 teardown_routing() {
     log_msg 1 "Removing external routing for interface $EXTERNAL_IFACE"
-
-    # Remove all rules for external table
-    while ip rule del table "$ROUTING_TABLE" 2>/dev/null; do :; done
-
-    # Flush routing table
-    ip route flush table "$ROUTING_TABLE" 2>/dev/null || true
-
-    # Remove table from rt_tables
-    if grep -q "^$ROUTING_TABLE " /etc/iproute2/rt_tables 2>/dev/null; then
-        sed -i "/^$ROUTING_TABLE /d" /etc/iproute2/rt_tables 2>/dev/null || true
-    fi
-
+    teardown_table "$ROUTING_TABLE"
     log_msg 1 "External routing removed"
 }
 

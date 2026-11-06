@@ -2,6 +2,27 @@
 
 Selective domain-based routing for Linux. Routes traffic for specific domains through an external WiFi interface while the rest of the traffic uses the corporate connection by default.
 
+## Table of contents
+
+- [Structure](#structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Uninstallation](#uninstallation)
+- [Configuration](#configuration)
+  - [Domains](#domains)
+  - [Literal IPs](#literal-ips)
+  - [Interfaces](#interfaces)
+- [CLI](#cli)
+- [Usage](#usage)
+  - [Automatic flow](#automatic-flow)
+  - [Useful commands](#useful-commands)
+- [How it works](#how-it-works)
+  - [Components](#components)
+- [Troubleshooting](#troubleshooting)
+  - [Domains not resolving](#domains-not-resolving)
+  - [Routing rules not created](#routing-rules-not-created)
+  - [Timer not starting](#timer-not-starting)
+
 ## Structure
 
 ```
@@ -10,7 +31,10 @@ llx-external-routing/
 │   └── config.conf                              # Main configuration
 ├── scripts/
 │   ├── llx-external-routing-dispatcher               # NetworkManager dispatcher
-│   └── refresh-external-routes                   # Periodic IP refresh
+│   ├── refresh-external-routes                   # Periodic IP refresh
+│   ├── llx-external-routes-ctl                   # CLI: list/add/remove destinations
+│   └── lib/
+│       └── common-routing.sh                     # Shared helpers
 ├── systemd/
 │   ├── llx-external-routes-refresh.service           # Systemd service
 │   └── llx-external-routes-refresh.timer             # Timer (every 15 min)
@@ -54,6 +78,9 @@ ROUTING_TABLE=100
 # Domains to route through external WiFi (space-separated)
 DOMAINS="tailscale.com tailscale.io anydesk.net facebook.com fbcdn.net"
 
+# Literal IPv4 addresses/CIDRs to route through external WiFi (space-separated)
+IPS="172.28.222.250 10.0.0.0/24"
+
 # External DNS (empty = use DHCP-assigned)
 EXTERNAL_DNS=""
 
@@ -72,13 +99,64 @@ VERBOSE=1
 - One domain per space in the `DOMAINS` variable
 - Automatically resolved to IPv4 addresses
 - `www.` subdomains are also resolved
-- To add/remove domains, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`
+- To add/remove domains, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-external-routes-ctl add domain <domain>`
+
+### Literal IPs
+
+- One IPv4 address or CIDR per space in the `IPS` variable (e.g. `IPS="172.28.222.250 10.0.0.0/24"`)
+- Used as-is, with **no DNS resolution** — useful for targets that aren't a domain (internal hosts, VPN endpoints, etc.)
+- Invalid entries are skipped and logged as a warning
+- IPv6 is not supported
+- To add/remove IPs, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-external-routes-ctl add ip <ip[/cidr]>`
 
 ### Interfaces
 
 - `CORPORATE_IFACE`: corporate network interface (default: eth0)
 - `EXTERNAL_IFACE`: external WiFi interface (default: wlan0)
 - Interface names can be changed in `config.conf`
+
+## CLI
+
+`llx-external-routes-ctl` lists, adds and removes domains/IPs without hand-editing `config.conf`. There is currently a single external interface (`EXTERNAL_IFACE`), so `list` groups destinations under it versus the corporate default route.
+
+```bash
+# List configured destinations, grouped by interface
+llx-external-routes-ctl list
+
+# Add a domain or a literal IP/CIDR (requires root)
+sudo llx-external-routes-ctl add domain anydesk.com
+sudo llx-external-routes-ctl add ip 172.28.222.250
+sudo llx-external-routes-ctl add ip 10.0.0.0/24
+
+# Remove a domain or IP (requires root)
+sudo llx-external-routes-ctl remove domain anydesk.com
+sudo llx-external-routes-ctl remove ip 172.28.222.250
+```
+
+`add`/`remove` write to `config.conf` and immediately run `refresh-external-routes` to apply the change. If `EXTERNAL_IFACE` isn't currently up, the config is still saved and the rule applies the next time it connects.
+
+### Settings (`get`/`set`)
+
+The rest of `config.conf` can also be managed from the CLI, except `REFRESH_INTERVAL` (see note below):
+
+```bash
+# Show a value
+llx-external-routes-ctl get ROUTING_TABLE
+
+# Change a value (requires root)
+sudo llx-external-routes-ctl set CORPORATE_IFACE eth0
+sudo llx-external-routes-ctl set EXTERNAL_IFACE wlan0
+sudo llx-external-routes-ctl set ROUTING_TABLE 100
+sudo llx-external-routes-ctl set EXTERNAL_DNS "8.8.8.8 1.1.1.1"
+sudo llx-external-routes-ctl set LOG_FILE /var/log/llx-external-routing.log
+sudo llx-external-routes-ctl set VERBOSE 1
+```
+
+- `EXTERNAL_IFACE` and `ROUTING_TABLE` tear down the live rules/routes under the old table number before applying the new value, so nothing is left orphaned.
+- `CORPORATE_IFACE` is informational only — this tool never routes traffic through it explicitly, it's just whatever already has the default route. Changing it has no effect on live rules.
+- `ROUTING_TABLE` is validated against `/etc/iproute2/rt_tables` (rejects kernel-reserved tables and numbers already used by another named table).
+- `EXTERNAL_DNS` and `LOG_FILE` accept an empty value (`""`) to restore their defaults (DHCP-assigned DNS / logging disabled).
+- `REFRESH_INTERVAL` is **not** managed by the CLI: it isn't actually read by any script, the real interval is hardcoded in `systemd/llx-external-routes-refresh.timer` (`OnUnitActiveSec`). To change it, edit that unit and run `sudo systemctl daemon-reload`.
 
 ## Usage
 
@@ -109,6 +187,9 @@ ip rule list
 # View resolved IPs for a domain
 cat /etc/llx-external-routes/ipsets/facebook.com.ips
 
+# List configured domains/IPs
+llx-external-routes-ctl list
+
 # View external routing table
 ip route show table 100
 
@@ -124,6 +205,11 @@ Traffic to facebook.com:
   → DNS resolution → 157.240.x.x
   → ip rule: "if destination is 157.240.x.x, use table 100"
   → Table 100: "default via <WiFi-gateway> dev wlan0"
+  → Goes out through external WiFi ✓
+
+Traffic to 172.28.222.250 (listed in IPS):
+  → No DNS resolution needed
+  → ip rule: "if destination is 172.28.222.250, use table 100"
   → Goes out through external WiFi ✓
 
 Traffic to google.com:

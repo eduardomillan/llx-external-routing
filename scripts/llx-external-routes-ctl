@@ -1,0 +1,399 @@
+#!/usr/bin/env bash
+# =============================================================================
+# llx-external-routes-ctl
+# CLI to list, add and remove domains/IPs routed through the external
+# interface. Edits config.conf and applies the change immediately.
+# =============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+CONF_PATHS=(
+    "/etc/llx-external-routes/config.conf"
+    "$SCRIPT_DIR/../conf/config.conf"
+)
+
+CONF_FILE=""
+for candidate in "${CONF_PATHS[@]}"; do
+    if [[ -f "$candidate" ]]; then
+        CONF_FILE="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$CONF_FILE" ]]; then
+    echo "ERROR: Config file not found in any of: ${CONF_PATHS[*]}" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$CONF_FILE"
+
+LIB_PATHS=(
+    "/usr/local/lib/llx-external-routing/common-routing.sh"
+    "$SCRIPT_DIR/lib/common-routing.sh"
+)
+
+LIB_FOUND=false
+for candidate in "${LIB_PATHS[@]}"; do
+    if [[ -f "$candidate" ]]; then
+        # shellcheck source=/dev/null
+        source "$candidate"
+        LIB_FOUND=true
+        break
+    fi
+done
+
+if [[ "$LIB_FOUND" == false ]]; then
+    echo "ERROR: common-routing.sh not found in any of: ${LIB_PATHS[*]}" >&2
+    exit 1
+fi
+
+REFRESH_PATHS=(
+    "/usr/local/bin/refresh-external-routes"
+    "$SCRIPT_DIR/refresh-external-routes"
+)
+
+REFRESH_BIN=""
+for candidate in "${REFRESH_PATHS[@]}"; do
+    if [[ -f "$candidate" ]]; then
+        REFRESH_BIN="$candidate"
+        break
+    fi
+done
+
+IPSETS_DIR="/etc/llx-external-routes/ipsets"
+
+SETTABLE_KEYS="CORPORATE_IFACE EXTERNAL_IFACE ROUTING_TABLE EXTERNAL_DNS LOG_FILE VERBOSE"
+GETTABLE_KEYS="$SETTABLE_KEYS DOMAINS IPS"
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") <command> [args]
+
+Destinations:
+  list                      List configured destinations grouped by interface
+  add domain <domain>       Add a domain routed via $EXTERNAL_IFACE
+  add ip <ip[/cidr]>        Add a literal IPv4 address/CIDR routed via $EXTERNAL_IFACE
+  remove domain <domain>    Remove a domain
+  remove ip <ip[/cidr]>     Remove a literal IPv4 address/CIDR
+
+Settings:
+  get <key>                 Show a config value ($GETTABLE_KEYS)
+  set <key> <value>         Change a config value ($SETTABLE_KEYS)
+                             (REFRESH_INTERVAL is not managed here, see README)
+
+Changes are written to $CONF_FILE and applied immediately (requires root).
+EOF
+}
+
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "ERROR: this command must be run as root (sudo)" >&2
+        exit 1
+    fi
+}
+
+is_valid_domain() {
+    [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]
+}
+
+# Reads the current value of a KEY="..." variable straight from CONF_FILE,
+# so chained edits never operate on a stale, already-sourced value.
+read_conf_var() {
+    local key="$1"
+    grep -E "^${key}=" "$CONF_FILE" | tail -1 | sed -E "s/^${key}=\"?([^\"]*)\"?\$/\1/" || true
+}
+
+write_conf_var() {
+    local key="$1"
+    local value="$2"
+    if grep -q -E "^${key}=" "$CONF_FILE"; then
+        sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$CONF_FILE"
+    else
+        echo "${key}=\"${value}\"" >> "$CONF_FILE"
+    fi
+}
+
+apply_change() {
+    if [[ -z "$REFRESH_BIN" ]]; then
+        echo "WARNING: refresh-external-routes not found, saved but not applied" >&2
+        return
+    fi
+
+    "$REFRESH_BIN"
+
+    if is_external_up; then
+        echo "Applied: routing rules refreshed"
+    else
+        echo "Saved: $EXTERNAL_IFACE is not up, rules will apply once it connects"
+    fi
+}
+
+list_targets() {
+    local domains ips
+    domains=$(read_conf_var DOMAINS)
+    ips=$(read_conf_var IPS)
+
+    echo "EXTERNAL_IFACE ($EXTERNAL_IFACE) - routed via table $ROUTING_TABLE:"
+
+    echo "  domains:"
+    if [[ -z "$domains" ]]; then
+        echo "    (none)"
+    else
+        local domain resolved
+        for domain in $domains; do
+            if [[ -f "$IPSETS_DIR/${domain}.ips" ]]; then
+                resolved=$(tr '\n' ' ' < "$IPSETS_DIR/${domain}.ips")
+            else
+                resolved="(not resolved yet)"
+            fi
+            printf '    %-30s -> %s\n' "$domain" "$resolved"
+        done
+    fi
+
+    echo "  ips:"
+    if [[ -z "$ips" ]]; then
+        echo "    (none)"
+    else
+        local ip
+        for ip in $ips; do
+            echo "    $ip"
+        done
+    fi
+
+    echo ""
+    echo "CORPORATE_IFACE ($CORPORATE_IFACE) - default route (everything else)"
+}
+
+add_domain() {
+    local domain="$1"
+    is_valid_domain "$domain" || { echo "ERROR: '$domain' is not a valid domain" >&2; exit 1; }
+
+    require_root
+    local current
+    current=$(read_conf_var DOMAINS)
+    local existing
+    for existing in $current; do
+        if [[ "$existing" == "$domain" ]]; then
+            echo "'$domain' is already configured"
+            return 0
+        fi
+    done
+
+    write_conf_var DOMAINS "$(echo "$current $domain" | xargs)"
+    echo "Added domain '$domain'"
+    apply_change
+}
+
+remove_domain() {
+    local domain="$1"
+    require_root
+    local current new found existing
+    current=$(read_conf_var DOMAINS)
+    new=""
+    found=false
+    for existing in $current; do
+        if [[ "$existing" == "$domain" ]]; then
+            found=true
+            continue
+        fi
+        new="$new $existing"
+    done
+
+    if [[ "$found" == false ]]; then
+        echo "'$domain' is not configured"
+        return 0
+    fi
+
+    write_conf_var DOMAINS "$(echo "$new" | xargs)"
+    rm -f "$IPSETS_DIR/${domain}.ips"
+    echo "Removed domain '$domain'"
+    apply_change
+}
+
+add_ip() {
+    local target="$1"
+    is_valid_ipv4_cidr "$target" || { echo "ERROR: '$target' is not a valid IPv4 address/CIDR" >&2; exit 1; }
+
+    require_root
+    local current
+    current=$(read_conf_var IPS)
+    local existing
+    for existing in $current; do
+        if [[ "$existing" == "$target" ]]; then
+            echo "'$target' is already configured"
+            return 0
+        fi
+    done
+
+    write_conf_var IPS "$(echo "$current $target" | xargs)"
+    echo "Added IP '$target'"
+    apply_change
+}
+
+remove_ip() {
+    local target="$1"
+    require_root
+    local current new found existing
+    current=$(read_conf_var IPS)
+    new=""
+    found=false
+    for existing in $current; do
+        if [[ "$existing" == "$target" ]]; then
+            found=true
+            continue
+        fi
+        new="$new $existing"
+    done
+
+    if [[ "$found" == false ]]; then
+        echo "'$target' is not configured"
+        return 0
+    fi
+
+    write_conf_var IPS "$(echo "$new" | xargs)"
+    echo "Removed IP '$target'"
+    apply_change
+}
+
+set_corporate_iface() {
+    local new="$1"
+    if [[ "$new" == "$EXTERNAL_IFACE" ]]; then
+        echo "ERROR: CORPORATE_IFACE cannot be the same as EXTERNAL_IFACE" >&2
+        exit 1
+    fi
+    if ! ip link show "$new" &>/dev/null; then
+        echo "WARNING: interface '$new' not found on this system right now" >&2
+    fi
+
+    require_root
+    write_conf_var CORPORATE_IFACE "$new"
+    echo "CORPORATE_IFACE set to '$new'"
+}
+
+set_external_iface() {
+    local new="$1"
+    if [[ "$new" == "$CORPORATE_IFACE" ]]; then
+        echo "ERROR: EXTERNAL_IFACE cannot be the same as CORPORATE_IFACE" >&2
+        exit 1
+    fi
+    if ! ip link show "$new" &>/dev/null; then
+        echo "WARNING: interface '$new' not found on this system right now" >&2
+    fi
+
+    require_root
+    teardown_table "$ROUTING_TABLE"
+    write_conf_var EXTERNAL_IFACE "$new"
+    EXTERNAL_IFACE="$new"
+    echo "EXTERNAL_IFACE set to '$new'"
+    apply_change
+}
+
+set_routing_table() {
+    local new="$1"
+    [[ "$new" =~ ^[0-9]+$ ]] || { echo "ERROR: ROUTING_TABLE must be a positive integer" >&2; exit 1; }
+    case "$new" in
+        0|253|254|255)
+            echo "ERROR: table $new is reserved by the kernel (unspec/default/main/local)" >&2
+            exit 1
+            ;;
+    esac
+    if grep -qE "^${new}[[:space:]]" /etc/iproute2/rt_tables 2>/dev/null \
+        && ! grep -qE "^${new}[[:space:]]+external\$" /etc/iproute2/rt_tables 2>/dev/null; then
+        echo "ERROR: table number $new is already used by another named table in /etc/iproute2/rt_tables" >&2
+        exit 1
+    fi
+
+    require_root
+    teardown_table "$ROUTING_TABLE"
+    write_conf_var ROUTING_TABLE "$new"
+    echo "ROUTING_TABLE set to '$new'"
+    apply_change
+}
+
+set_external_dns() {
+    local value="$1"
+    local ip
+    for ip in $value; do
+        if [[ "$ip" == *"/"* ]] || ! is_valid_ipv4_cidr "$ip"; then
+            echo "ERROR: '$ip' is not a valid IPv4 address" >&2
+            exit 1
+        fi
+    done
+
+    require_root
+    write_conf_var EXTERNAL_DNS "$value"
+    echo "EXTERNAL_DNS set to '${value:-<empty, use DHCP-assigned DNS>}'"
+    apply_change
+}
+
+set_log_file() {
+    local value="$1"
+    if [[ -n "$value" && "${value:0:1}" != "/" ]]; then
+        echo "ERROR: LOG_FILE must be an absolute path, or empty to disable logging" >&2
+        exit 1
+    fi
+
+    require_root
+    write_conf_var LOG_FILE "$value"
+    echo "LOG_FILE set to '${value:-<empty, logging disabled>}'"
+}
+
+set_verbose() {
+    local value="$1"
+    [[ "$value" =~ ^[0-2]$ ]] || { echo "ERROR: VERBOSE must be 0, 1 or 2" >&2; exit 1; }
+
+    require_root
+    write_conf_var VERBOSE "$value"
+    echo "VERBOSE set to '$value'"
+}
+
+case "${1:-}" in
+    list)
+        list_targets
+        ;;
+    get)
+        key="${2:-}"
+        if [[ -z "$key" ]]; then usage; exit 1; fi
+        case " $GETTABLE_KEYS " in
+            *" $key "*) echo "${key}=\"$(read_conf_var "$key")\"" ;;
+            *) echo "ERROR: unknown key '$key' (expected one of: $GETTABLE_KEYS)" >&2; exit 1 ;;
+        esac
+        ;;
+    set)
+        key="${2:-}"
+        if [[ $# -lt 3 ]]; then usage; exit 1; fi
+        value="$3"
+        case "$key" in
+            CORPORATE_IFACE) set_corporate_iface "$value" ;;
+            EXTERNAL_IFACE)  set_external_iface "$value" ;;
+            ROUTING_TABLE)   set_routing_table "$value" ;;
+            EXTERNAL_DNS)    set_external_dns "$value" ;;
+            LOG_FILE)        set_log_file "$value" ;;
+            VERBOSE)         set_verbose "$value" ;;
+            *) echo "ERROR: unknown or unsupported key '$key' (expected one of: $SETTABLE_KEYS)" >&2; exit 1 ;;
+        esac
+        ;;
+    add)
+        case "${2:-}" in
+            domain) [[ -n "${3:-}" ]] || { usage; exit 1; }; add_domain "$3" ;;
+            ip)     [[ -n "${3:-}" ]] || { usage; exit 1; }; add_ip "$3" ;;
+            *) usage; exit 1 ;;
+        esac
+        ;;
+    remove)
+        case "${2:-}" in
+            domain) [[ -n "${3:-}" ]] || { usage; exit 1; }; remove_domain "$3" ;;
+            ip)     [[ -n "${3:-}" ]] || { usage; exit 1; }; remove_ip "$3" ;;
+            *) usage; exit 1 ;;
+        esac
+        ;;
+    -h|--help|help|"")
+        usage
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac

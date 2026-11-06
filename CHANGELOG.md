@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3] - 2026-11-06
+
+### Added
+
+- `IPS` config variable: route literal IPv4 addresses/CIDRs through external WiFi, bypassing DNS resolution (useful for non-domain targets like `172.28.222.250`).
+- `llx-external-routes-ctl` CLI: `list`, `add domain|ip`, `remove domain|ip`. Edits `config.conf` and applies the change immediately via `refresh-external-routes`.
+- `llx-external-routes-ctl get|set` for the rest of `config.conf` (`CORPORATE_IFACE`, `EXTERNAL_IFACE`, `ROUTING_TABLE`, `EXTERNAL_DNS`, `LOG_FILE`, `VERBOSE`). `EXTERNAL_IFACE`/`ROUTING_TABLE` tear down the old table before applying. `REFRESH_INTERVAL` is intentionally left out — it isn't read by any script; the real interval is hardcoded in the systemd timer unit.
+
+### Changed
+
+- Extracted shared logic (`log_msg`, DNS/gateway lookups, domain resolution) from both scripts into `scripts/lib/common-routing.sh`, sourced by both `llx-external-routing-dispatcher` and `refresh-external-routes`, to remove duplication.
+
 ## [0.2] - 2026-07-13
 
 ### Fixed
