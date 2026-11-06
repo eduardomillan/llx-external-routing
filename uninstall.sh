@@ -33,7 +33,7 @@ echo "  OK: Dispatcher removed"
 echo "[3/5] Removing scripts..."
 rm -f /usr/local/bin/llx-external-routing-dispatcher
 rm -f /usr/local/bin/refresh-external-routes
-rm -f /usr/local/bin/llx-external-routes-ctl
+rm -f /usr/local/bin/llx-exroute-cli
 rm -rf /usr/local/lib/llx-external-routing
 echo "  OK: Scripts removed"
 
@@ -66,7 +66,7 @@ echo "Removed files:"
 echo "  /etc/NetworkManager/dispatcher.d/99-llx-external-routing"
 echo "  /usr/local/bin/llx-external-routing-dispatcher"
 echo "  /usr/local/bin/refresh-external-routes"
-echo "  /usr/local/bin/llx-external-routes-ctl"
+echo "  /usr/local/bin/llx-exroute-cli"
 echo "  /usr/local/lib/llx-external-routing/"
 echo "  /etc/systemd/system/llx-external-routes-refresh.service"
 echo "  /etc/systemd/system/llx-external-routes-refresh.timer"

@@ -32,7 +32,7 @@ llx-external-routing/
 ├── scripts/
 │   ├── llx-external-routing-dispatcher               # NetworkManager dispatcher
 │   ├── refresh-external-routes                   # Periodic IP refresh
-│   ├── llx-external-routes-ctl                   # CLI: list/add/remove destinations
+│   ├── llx-exroute-cli                   # CLI: list/add/remove destinations
 │   └── lib/
 │       └── common-routing.sh                     # Shared helpers
 ├── systemd/
@@ -99,7 +99,7 @@ VERBOSE=1
 - One domain per space in the `DOMAINS` variable
 - Automatically resolved to IPv4 addresses
 - `www.` subdomains are also resolved
-- To add/remove domains, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-external-routes-ctl add domain <domain>`
+- To add/remove domains, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-exroute-cli add domain <domain>`
 
 ### Literal IPs
 
@@ -107,7 +107,7 @@ VERBOSE=1
 - Used as-is, with **no DNS resolution** — useful for targets that aren't a domain (internal hosts, VPN endpoints, etc.)
 - Invalid entries are skipped and logged as a warning
 - IPv6 is not supported
-- To add/remove IPs, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-external-routes-ctl add ip <ip[/cidr]>`
+- To add/remove IPs, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-exroute-cli add ip <ip[/cidr]>`
 
 ### Interfaces
 
@@ -117,20 +117,20 @@ VERBOSE=1
 
 ## CLI
 
-`llx-external-routes-ctl` lists, adds and removes domains/IPs without hand-editing `config.conf`. There is currently a single external interface (`EXTERNAL_IFACE`), so `list` groups destinations under it versus the corporate default route.
+`llx-exroute-cli` lists, adds and removes domains/IPs without hand-editing `config.conf`. There is currently a single external interface (`EXTERNAL_IFACE`), so `list` groups destinations under it versus the corporate default route.
 
 ```bash
 # List configured destinations, grouped by interface
-llx-external-routes-ctl list
+llx-exroute-cli list
 
 # Add a domain or a literal IP/CIDR (requires root)
-sudo llx-external-routes-ctl add domain anydesk.com
-sudo llx-external-routes-ctl add ip 172.28.222.250
-sudo llx-external-routes-ctl add ip 10.0.0.0/24
+sudo llx-exroute-cli add domain anydesk.com
+sudo llx-exroute-cli add ip 172.28.222.250
+sudo llx-exroute-cli add ip 10.0.0.0/24
 
 # Remove a domain or IP (requires root)
-sudo llx-external-routes-ctl remove domain anydesk.com
-sudo llx-external-routes-ctl remove ip 172.28.222.250
+sudo llx-exroute-cli remove domain anydesk.com
+sudo llx-exroute-cli remove ip 172.28.222.250
 ```
 
 `add`/`remove` write to `config.conf` and immediately run `refresh-external-routes` to apply the change. If `EXTERNAL_IFACE` isn't currently up, the config is still saved and the rule applies the next time it connects.
@@ -141,22 +141,23 @@ The rest of `config.conf` can also be managed from the CLI, except `REFRESH_INTE
 
 ```bash
 # Show a value
-llx-external-routes-ctl get ROUTING_TABLE
+llx-exroute-cli get ROUTING_TABLE
 
 # Change a value (requires root)
-sudo llx-external-routes-ctl set CORPORATE_IFACE eth0
-sudo llx-external-routes-ctl set EXTERNAL_IFACE wlan0
-sudo llx-external-routes-ctl set ROUTING_TABLE 100
-sudo llx-external-routes-ctl set EXTERNAL_DNS "8.8.8.8 1.1.1.1"
-sudo llx-external-routes-ctl set LOG_FILE /var/log/llx-external-routing.log
-sudo llx-external-routes-ctl set VERBOSE 1
+sudo llx-exroute-cli set CORPORATE_IFACE eth0
+sudo llx-exroute-cli set EXTERNAL_IFACE wlan0
+sudo llx-exroute-cli set ROUTING_TABLE 100
+sudo llx-exroute-cli set EXTERNAL_DNS "8.8.8.8 1.1.1.1"
+sudo llx-exroute-cli set REFRESH_INTERVAL 15
+sudo llx-exroute-cli set LOG_FILE /var/log/llx-external-routing.log
+sudo llx-exroute-cli set VERBOSE 1
 ```
 
 - `EXTERNAL_IFACE` and `ROUTING_TABLE` tear down the live rules/routes under the old table number before applying the new value, so nothing is left orphaned.
 - `CORPORATE_IFACE` is informational only — this tool never routes traffic through it explicitly, it's just whatever already has the default route. Changing it has no effect on live rules.
 - `ROUTING_TABLE` is validated against `/etc/iproute2/rt_tables` (rejects kernel-reserved tables and numbers already used by another named table).
 - `EXTERNAL_DNS` and `LOG_FILE` accept an empty value (`""`) to restore their defaults (DHCP-assigned DNS / logging disabled).
-- `REFRESH_INTERVAL` is **not** managed by the CLI: it isn't actually read by any script, the real interval is hardcoded in `systemd/llx-external-routes-refresh.timer` (`OnUnitActiveSec`). To change it, edit that unit and run `sudo systemctl daemon-reload`.
+- `REFRESH_INTERVAL` (minutes) rewrites `OnUnitActiveSec` in the installed `llx-external-routes-refresh.timer` unit and runs `systemctl daemon-reload` + `systemctl restart llx-external-routes-refresh.timer` to apply it immediately. `install.sh` and the `.deb` postinst also apply whatever `REFRESH_INTERVAL` is in `config.conf` to the timer at install time.
 
 ## Usage
 
@@ -188,7 +189,7 @@ ip rule list
 cat /etc/llx-external-routes/ipsets/facebook.com.ips
 
 # List configured domains/IPs
-llx-external-routes-ctl list
+llx-exroute-cli list
 
 # View external routing table
 ip route show table 100

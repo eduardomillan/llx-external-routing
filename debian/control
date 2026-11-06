@@ -17,6 +17,6 @@ Description: Selective domain-based routing for Linux
  Features:
   - NetworkManager dispatcher for automatic routing setup
   - Configurable domains, literal IPs/CIDRs, and network interfaces
-  - llx-external-routes-ctl CLI to list/add/remove domains and IPs
+  - llx-exroute-cli CLI to list/add/remove domains and IPs
   - Systemd timer for periodic IP refresh
   - Easy configuration via /etc/llx-external-routes/config.conf
