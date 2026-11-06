@@ -51,8 +51,13 @@ fi
 echo "[4/6] Installing scripts..."
 cp "$SCRIPT_DIR/scripts/llx-external-routing-dispatcher" /usr/local/bin/llx-external-routing-dispatcher
 cp "$SCRIPT_DIR/scripts/refresh-external-routes" /usr/local/bin/refresh-external-routes
+cp "$SCRIPT_DIR/scripts/llx-external-routes-ctl" /usr/local/bin/llx-external-routes-ctl
 chmod 755 /usr/local/bin/llx-external-routing-dispatcher
 chmod 755 /usr/local/bin/refresh-external-routes
+chmod 755 /usr/local/bin/llx-external-routes-ctl
+mkdir -p /usr/local/lib/llx-external-routing
+cp "$SCRIPT_DIR/scripts/lib/common-routing.sh" /usr/local/lib/llx-external-routing/common-routing.sh
+chmod 644 /usr/local/lib/llx-external-routing/common-routing.sh
 echo "  OK: Scripts installed to /usr/local/bin/"
 
 # Install NetworkManager dispatcher
@@ -84,15 +89,18 @@ echo "  /etc/llx-external-routes/config.conf          - Main configuration"
 echo "  /etc/llx-external-routes/ipsets/              - Resolved IPs"
 echo "  /usr/local/bin/llx-external-routing-dispatcher - NM dispatcher"
 echo "  /usr/local/bin/refresh-external-routes     - Refresh script"
+echo "  /usr/local/bin/llx-external-routes-ctl     - CLI (list/add/remove)"
+echo "  /usr/local/lib/llx-external-routing/common-routing.sh - Shared helpers"
 echo "  /etc/NetworkManager/dispatcher.d/99-llx-external-routing"
 echo "  /etc/systemd/system/llx-external-routes-refresh.service"
 echo "  /etc/systemd/system/llx-external-routes-refresh.timer"
 echo ""
 echo "Usage:"
-echo "  1. Edit /etc/llx-external-routes/config.conf with your domains"
+echo "  1. Edit /etc/llx-external-routes/config.conf with your domains/IPs,"
+echo "     or use: sudo llx-external-routes-ctl add domain|ip <value>"
 echo "  2. Connect external WiFi - routing activates automatically"
 echo "  3. View logs: journalctl -u llx-external-routes-refresh -f"
-echo "  4. Verify: ip rule list"
+echo "  4. Verify: ip rule list / llx-external-routes-ctl list"
 echo "  5. Force refresh: sudo /usr/local/bin/refresh-external-routes"
 echo ""
 echo "To uninstall: sudo /path/to/uninstall.sh"
