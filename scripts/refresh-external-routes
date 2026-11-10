@@ -87,6 +87,9 @@ fi
 # Update default route in external table
 ip route replace default via "$local_gw" dev "$EXTERNAL_IFACE" table "$ROUTING_TABLE" 2>/dev/null || true
 
+# Auto-add EXTERNAL_IFACE's own local network to IPS, so it's routed too
+auto_add_local_network
+
 # Remove existing rules
 while ip rule del table "$ROUTING_TABLE" 2>/dev/null; do :; done
 

@@ -110,6 +110,7 @@ VERBOSE=1
 - Invalid entries are skipped and logged as a warning
 - IPv6 is not supported
 - To add/remove IPs, edit `config.conf` and run `sudo /usr/local/bin/refresh-external-routes`, or use the [CLI](#cli): `sudo llx-exroute-cli add ip <ip[/cidr]>`
+- `EXTERNAL_IFACE`'s own local network (e.g. `192.168.1.0/24`) is detected and added to `IPS` automatically whenever it comes up or on each refresh, so devices on that WiFi (router, printer, NAS...) stay reachable. If you deliberately remove it with `llx-exroute-cli remove ip <cidr>`, that CIDR is recorded in `EXCLUDED_IPS` so auto-detection won't add it back — even after roaming to a different `EXTERNAL_IFACE` connection later.
 
 ### Interfaces
 
@@ -122,6 +123,10 @@ VERBOSE=1
 `llx-exroute-cli` lists, adds and removes domains/IPs without hand-editing `config.conf`. There is currently a single external interface (`EXTERNAL_IFACE`), so `list` groups destinations under it versus the corporate default route.
 
 ```bash
+# Show the installed version
+llx-exroute-cli -v
+llx-exroute-cli --version
+
 # List configured destinations, grouped by interface
 llx-exroute-cli list
 
@@ -148,6 +153,7 @@ llx-exroute-cli get all   # same thing
 
 # Show a single value
 llx-exroute-cli get ROUTING_TABLE
+llx-exroute-cli get EXCLUDED_IPS   # local networks deliberately removed, kept out of auto-detection
 
 # Change a value (requires root)
 sudo llx-exroute-cli set CORPORATE_IFACE eth0

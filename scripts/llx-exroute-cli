@@ -62,10 +62,33 @@ for candidate in "${REFRESH_PATHS[@]}"; do
     fi
 done
 
+VERSION_PATHS=(
+    "/usr/local/lib/llx-external-routing/version.conf"
+    "$SCRIPT_DIR/../conf/version.conf"
+)
+
+VERSION_FILE=""
+for candidate in "${VERSION_PATHS[@]}"; do
+    if [[ -f "$candidate" ]]; then
+        VERSION_FILE="$candidate"
+        break
+    fi
+done
+
+print_version() {
+    if [[ -z "$VERSION_FILE" ]]; then
+        echo "ERROR: version.conf not found in any of: ${VERSION_PATHS[*]}" >&2
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    source "$VERSION_FILE"
+    echo "${PACKAGE} ${VERSION}-${RELEASE}"
+}
+
 IPSETS_DIR="/etc/llx-external-routes/ipsets"
 
 SETTABLE_KEYS="CORPORATE_IFACE EXTERNAL_IFACE ROUTING_TABLE EXTERNAL_DNS REFRESH_INTERVAL LOG_FILE VERBOSE"
-GETTABLE_KEYS="$SETTABLE_KEYS DOMAINS IPS ENABLED"
+GETTABLE_KEYS="$SETTABLE_KEYS DOMAINS IPS ENABLED EXCLUDED_IPS"
 
 TIMER_PATHS=(
     "/etc/systemd/system/llx-external-routes-refresh.timer"
@@ -84,12 +107,19 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") <command> [args]
 
+Options:
+  -v, --version             Show the installed version
+
 Destinations:
   list                      List configured destinations grouped by interface
   add domain <domain>       Add a domain routed via $EXTERNAL_IFACE
   add ip <ip[/cidr]>        Add a literal IPv4 address/CIDR routed via $EXTERNAL_IFACE
   remove domain <domain>    Remove a domain
   remove ip <ip[/cidr]>     Remove a literal IPv4 address/CIDR
+
+$EXTERNAL_IFACE's own local network is detected and added automatically on
+connect/refresh. Removing it with 'remove ip' keeps it out permanently
+(recorded in EXCLUDED_IPS).
 
 Settings:
   get [all]                 Show all config values ($GETTABLE_KEYS)
@@ -113,23 +143,6 @@ require_root() {
 
 is_valid_domain() {
     [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]
-}
-
-# Reads the current value of a KEY="..." variable straight from CONF_FILE,
-# so chained edits never operate on a stale, already-sourced value.
-read_conf_var() {
-    local key="$1"
-    grep -E "^${key}=" "$CONF_FILE" | tail -1 | sed -E "s/^${key}=\"?([^\"]*)\"?\$/\1/" || true
-}
-
-write_conf_var() {
-    local key="$1"
-    local value="$2"
-    if grep -q -E "^${key}=" "$CONF_FILE"; then
-        sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$CONF_FILE"
-    else
-        echo "${key}=\"${value}\"" >> "$CONF_FILE"
-    fi
 }
 
 apply_change() {
@@ -277,6 +290,16 @@ remove_ip() {
     fi
 
     write_conf_var IPS "$(echo "$new" | xargs)"
+
+    local excluded already_excluded=false
+    excluded=$(read_conf_var EXCLUDED_IPS)
+    for existing in $excluded; do
+        [[ "$existing" == "$target" ]] && already_excluded=true
+    done
+    if [[ "$already_excluded" == false ]]; then
+        write_conf_var EXCLUDED_IPS "$(echo "$excluded $target" | xargs)"
+    fi
+
     echo "Removed IP '$target'"
     apply_change
 }
@@ -461,6 +484,9 @@ case "${1:-}" in
             ip)     [[ -n "${3:-}" ]] || { usage; exit 1; }; remove_ip "$3" ;;
             *) usage; exit 1 ;;
         esac
+        ;;
+    -v|--version)
+        print_version
         ;;
     -h|--help|help|"")
         usage

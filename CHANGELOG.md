@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.5] - 2026-11-10
+
+### Added
+
+- `llx-exroute-cli -v`/`--version`: prints the installed package version (`PACKAGE VERSION-RELEASE`), read from `version.conf`. `conf/version.conf` is now also installed to `/usr/local/lib/llx-external-routing/version.conf` (via `install.sh` and the `.deb`) so the CLI can read it at runtime, matching how `common-routing.sh` is installed.
+- `EXTERNAL_IFACE`'s own local network (e.g. `192.168.1.0/24`) is now detected and added to `IPS` automatically, both on NetworkManager connect (dispatcher) and on every periodic refresh (previously only the dispatcher partially did this, and only as a non-persisted in-table route, invisible to `llx-exroute-cli`/`config.conf`). This keeps devices on that WiFi (router, printer, NAS...) reachable, and the entry is now visible via `llx-exroute-cli list`/`get IPS` like any other configured destination.
+- New `EXCLUDED_IPS` config key: if a user deliberately removes an auto-added local network with `llx-exroute-cli remove ip <cidr>`, it's recorded here so auto-detection won't re-add it later, including after roaming to a different `EXTERNAL_IFACE` connection.
+
+### Changed
+
+- Extracted `read_conf_var`/`write_conf_var` (previously duplicated in `llx-exroute-cli`) into `common-routing.sh`, so the auto-detected local network can be persisted to `config.conf` from the dispatcher and refresh scripts too.
+
 ## [0.3] - 2026-11-06
 
 ### Added

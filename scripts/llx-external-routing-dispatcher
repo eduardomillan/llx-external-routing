@@ -92,12 +92,8 @@ setup_routing() {
     ip route add default via "$gw" dev "$EXTERNAL_IFACE" table "$ROUTING_TABLE" 2>/dev/null || true
     log_msg 1 "Default route added in table $ROUTING_TABLE via $gw"
 
-    # Add local network route in external table
-    local ext_net
-    ext_net=$(ip -4 addr show dev "$EXTERNAL_IFACE" 2>/dev/null | awk '/inet / {print $2}' | head -1)
-    if [[ -n "$ext_net" ]]; then
-        ip route add "$ext_net" dev "$EXTERNAL_IFACE" table "$ROUTING_TABLE" 2>/dev/null || true
-    fi
+    # Auto-add EXTERNAL_IFACE's own local network to IPS, so it's routed too
+    auto_add_local_network
 
     resolve_and_add_rules
 

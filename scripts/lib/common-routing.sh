@@ -1,10 +1,28 @@
 # =============================================================================
 # common-routing.sh
-# Shared helpers for llx-external-routing-dispatcher and refresh-external-routes.
-# Must be sourced after config.conf; expects $ROUTING_TABLE, $EXTERNAL_IFACE,
-# $EXTERNAL_DNS, $DOMAINS, $IPS, $LOG_FILE, $VERBOSE, $IPSETS_DIR and $LOG_TAG
+# Shared helpers for llx-external-routing-dispatcher, refresh-external-routes
+# and llx-exroute-cli. Must be sourced after config.conf; expects
+# $ROUTING_TABLE, $EXTERNAL_IFACE, $EXTERNAL_DNS, $DOMAINS, $IPS,
+# $EXCLUDED_IPS, $LOG_FILE, $VERBOSE, $IPSETS_DIR, $CONF_FILE and $LOG_TAG
 # to already be set by the caller.
 # =============================================================================
+
+# Reads the current value of a KEY="..." variable straight from $CONF_FILE,
+# so chained edits never operate on a stale, already-sourced value.
+read_conf_var() {
+    local key="$1"
+    grep -E "^${key}=" "$CONF_FILE" | tail -1 | sed -E "s/^${key}=\"?([^\"]*)\"?\$/\1/" || true
+}
+
+write_conf_var() {
+    local key="$1"
+    local value="$2"
+    if grep -q -E "^${key}=" "$CONF_FILE"; then
+        sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$CONF_FILE"
+    else
+        echo "${key}=\"${value}\"" >> "$CONF_FILE"
+    fi
+}
 
 log_msg() {
     local level="$1"
@@ -126,6 +144,43 @@ add_domain_rules() {
 
         log_msg 1 "Domain $domain -> $(echo "$ips" | tr '\n' ' ')"
     done
+}
+
+# Detects the IPv4 CIDR directly connected to $EXTERNAL_IFACE
+# (e.g. 192.168.1.0/24), i.e. the local network the script is running on.
+detect_local_network() {
+    ip -4 addr show dev "$EXTERNAL_IFACE" 2>/dev/null | awk '/inet / {print $2}' | head -1
+}
+
+# Lets table $ROUTING_TABLE reach $EXTERNAL_IFACE's own local network
+# directly (on-link), instead of via its default gateway.
+add_local_network_route() {
+    local net="$1"
+    ip route replace "$net" dev "$EXTERNAL_IFACE" table "$ROUTING_TABLE" 2>/dev/null || true
+}
+
+# Auto-adds $EXTERNAL_IFACE's local network to $IPS (persisted to $CONF_FILE)
+# so it's routed like any other configured destination, unless it's already
+# there or was deliberately removed before (recorded in $EXCLUDED_IPS by
+# `llx-exroute-cli remove ip`).
+auto_add_local_network() {
+    local net
+    net=$(detect_local_network)
+    [[ -z "$net" ]] && return
+
+    add_local_network_route "$net"
+
+    local existing
+    for existing in ${IPS:-}; do
+        [[ "$existing" == "$net" ]] && return
+    done
+    for existing in ${EXCLUDED_IPS:-}; do
+        [[ "$existing" == "$net" ]] && return
+    done
+
+    IPS="$(echo "${IPS:-} $net" | xargs)"
+    write_conf_var IPS "$IPS"
+    log_msg 1 "Auto-added local network $net ($EXTERNAL_IFACE) to IPS"
 }
 
 # Adds "ip rule" entries for literal IPs/CIDRs listed in $IPS, bypassing DNS.

@@ -21,6 +21,8 @@ override_dh_auto_install:
 	install -m 755 scripts/llx-exroute-cli debian/llx-external-routing/usr/local/bin/llx-exroute-cli
 	# Install shared library
 	install -m 644 scripts/lib/common-routing.sh debian/llx-external-routing/usr/local/lib/llx-external-routing/common-routing.sh
+	# Install version metadata
+	install -m 644 conf/version.conf debian/llx-external-routing/usr/local/lib/llx-external-routing/version.conf
 	# Install systemd units
 	install -m 644 systemd/llx-external-routes-refresh.service debian/llx-external-routing/etc/systemd/system/llx-external-routes-refresh.service
 	install -m 644 systemd/llx-external-routes-refresh.timer debian/llx-external-routing/etc/systemd/system/llx-external-routes-refresh.timer

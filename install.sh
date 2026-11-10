@@ -58,6 +58,8 @@ chmod 755 /usr/local/bin/llx-exroute-cli
 mkdir -p /usr/local/lib/llx-external-routing
 cp "$SCRIPT_DIR/scripts/lib/common-routing.sh" /usr/local/lib/llx-external-routing/common-routing.sh
 chmod 644 /usr/local/lib/llx-external-routing/common-routing.sh
+cp "$SCRIPT_DIR/conf/version.conf" /usr/local/lib/llx-external-routing/version.conf
+chmod 644 /usr/local/lib/llx-external-routing/version.conf
 echo "  OK: Scripts installed to /usr/local/bin/"
 
 # Install NetworkManager dispatcher
